@@ -4,9 +4,9 @@ import * as Location from 'expo-location';
 import MapView, { Marker, Circle } from 'react-native-maps';
 import io from 'socket.io-client';
 
-const SERVER_URL = 'http://192.168.50.227:3000'; // replace with your IP
+const SERVER_URL = 'http://192.168.50.227:3000'; // replace with your local server IP
 const RACE_ID = 'race123';
-const START_RADIUS = 0.0001; // roughly 10 meters
+const START_RADIUS = 0.0001; // about 10 m
 
 export default function App() {
   const [name, setName] = useState('');
@@ -17,15 +17,17 @@ export default function App() {
   const [lapCount, setLapCount] = useState(0);
   const [lapTimes, setLapTimes] = useState([]);
   const [lapStartTime, setLapStartTime] = useState(null);
-  const [startLine, setStartLine] = useState(null); // 🟩 NEW
-  const [setMode, setSetMode] = useState(false); // 🟩 NEW
+  const [startLine, setStartLine] = useState(null);
+  const [showSetup, setShowSetup] = useState(false); // 👈 NEW screen state
+
   const socketRef = useRef(null);
   const mapRef = useRef(null);
   const hasCrossedLine = useRef(false);
 
+  // Join Race
   const joinRace = async () => {
     if (!startLine) {
-      Alert.alert('Set Start Line First', 'Tap “Set Start Line” then tap on the map to choose.');
+      Alert.alert('Set Start Line First', 'Tap “📍 Set Start Line” before joining.');
       return;
     }
 
@@ -129,14 +131,42 @@ export default function App() {
   const formatTime = (t) => `${(t / 60).toFixed(0)}:${(t % 60).toFixed(1)}`;
   const bestLap = lapTimes.length ? Math.min(...lapTimes).toFixed(2) : '--';
 
-  // 🟩 NEW: handle map tap to set start line
-  const handleMapPress = (e) => {
-    if (!setMode) return;
-    const { latitude, longitude } = e.nativeEvent.coordinate;
-    setStartLine({ lat: latitude, lng: longitude });
-    setSetMode(false);
-    Alert.alert('✅ Start Line Set', 'You can now join the race.');
-  };
+  // 👇 NEW: Setup screen map for start line selection
+  if (showSetup) {
+    return (
+      <View style={{ flex: 1 }}>
+        <MapView
+          style={{ flex: 1 }}
+          initialRegion={{
+            latitude: position?.lat || 37.7749,
+            longitude: position?.lng || -122.4194,
+            latitudeDelta: 0.001, // closer zoom
+            longitudeDelta: 0.001,
+          }}
+          onPress={(e) => {
+            const { latitude, longitude } = e.nativeEvent.coordinate;
+            setStartLine({ lat: latitude, lng: longitude });
+          }}
+        >
+          {startLine && (
+            <>
+              <Marker coordinate={startLine} pinColor="green" />
+              <Circle
+                center={startLine}
+                radius={START_RADIUS * 111000}
+                strokeColor="green"
+                fillColor="rgba(0,255,0,0.2)"
+              />
+            </>
+          )}
+        </MapView>
+        <View style={styles.setupButtons}>
+          <Button title="✅ Confirm Start Line" onPress={() => setShowSetup(false)} />
+          <Button title="❌ Cancel" color="red" onPress={() => setShowSetup(false)} />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -151,15 +181,23 @@ export default function App() {
             onChangeText={setName}
           />
 
-          {!setMode ? (
-            <Button title="📍 Set Start Line" onPress={() => setSetMode(true)} />
-          ) : (
-            <Text style={{ color: '#0f0', marginVertical: 10 }}>Tap map to choose start line...</Text>
-          )}
+          <Button
+            title="📍 Set Start Line"
+            onPress={async () => {
+              const { status } = await Location.requestForegroundPermissionsAsync();
+              if (status !== 'granted') {
+                Alert.alert('Location permission denied');
+                return;
+              }
+              const loc = await Location.getCurrentPositionAsync({});
+              setPosition({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+              setShowSetup(true);
+            }}
+          />
 
           {startLine && (
             <Text style={{ color: '#aaa', marginTop: 10 }}>
-              Start at: {startLine.lat.toFixed(5)}, {startLine.lng.toFixed(5)}
+              Start: {startLine.lat.toFixed(5)}, {startLine.lng.toFixed(5)}
             </Text>
           )}
 
@@ -177,7 +215,6 @@ export default function App() {
                 latitudeDelta: 0.001,
                 longitudeDelta: 0.001,
               }}
-              onPress={handleMapPress} // 🟩 NEW
             >
               {startLine && (
                 <>
@@ -241,6 +278,13 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   map: { width: Dimensions.get('window').width, height: Dimensions.get('window').height },
+  setupButtons: {
+    position: 'absolute',
+    bottom: 30,
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
   deltaBox: {
     position: 'absolute',
     top: 40,
